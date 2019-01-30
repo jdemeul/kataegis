@@ -3,14 +3,19 @@
 #STATICS
 library(readr)
 library(ggplot2)
-PCFDIR <- "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180309_pcf_rerun/"
-CCLUSTDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/20180319_consensus_subclonal_reconstruction_beta1.5_svfix"
-CCCFDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/WM_release20170325/mutcff/"
-NSIMS <- 10000
+PCFDIR <- "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20180309_pcf_rerun/"
+CCLUSTDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.1_20181121/"
+CTIMINGDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.1_20181121_probgain/"
+CCCFDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.1_20181121_mutccf/"
+KATRESULTSFILE <- "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_Kataegis_Results_all.txt"
+NSIMS <- 100
+
+source(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/code_kataegis/kataegis_functions.R", local = T)
 
 
 # katcalls <- allpcfout_clean
 ## TEMP: only LOH events
+allpcfout_clean <- read.delim(file = KATRESULTSFILE, as.is = T)
 allpcfout_clean_inform <- allpcfout_clean[allpcfout_clean$informative > 0 & allpcfout_clean$is_preferred, ]
 # allpcfout_clean_inform <- allpcfout_clean[allpcfout_clean$informative > 0 & allpcfout_clean$is_preferred & allpcfout_clean$nMin == 0, ]
 samplesnhist <- allpcfout_clean_inform[!duplicated(allpcfout_clean_inform$sample), c("sample", "histology")]
@@ -18,8 +23,8 @@ samplesnhist <- allpcfout_clean_inform[!duplicated(allpcfout_clean_inform$sample
 
 ### start function defs
 # for every sample, do
-simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLUSTDIR, cccfdir = CCCFDIR, katcalls, nreps = 10) {
-  # print(sample_id)
+simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLUSTDIR, cccfdir = CCCFDIR, ctimingdir = CTIMINGDIR, katcalls, nreps = 10) {
+  print(sample_id)
   # katcalls in sample
   # must have made sure that no samples without any informative foci are excluded from input samplelist
   katcallsub <- katcalls[katcalls$sample == sample_id, ]
@@ -41,17 +46,20 @@ simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLU
   # clustering consensus data
   cassignments <- read.delim(file = gzfile(file.path(cclustdir, paste0(sample_id, "_cluster_assignments.txt.gz"))), header = T, sep = "\t", as.is = T)
   cccfs <- read.delim(file = gzfile(file.path(cccfdir, paste0(sample_id, "_mutation_ccf.txt.gz"))), header = T, sep = "\t", as.is = T)
-  ctiming <- read.delim(file = gzfile(file.path(cclustdir, paste0(sample_id, "_mutation_timing.txt.gz"))), header = T, sep = "\t", as.is = T)
+  ctiming <- read.delim(file = gzfile(file.path(ctimingdir, paste0(sample_id, "_prob_gained.txt"))), header = T, sep = "\t", as.is = T)
+  colnames(ctiming) <- c("chromosome", "position", "mut_type", "timing", "chromosome2", "position2", "svid", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")
   
   if (all(c(nrow(cassignments), nrow(cccfs), nrow(ctiming)) == nrow(cassignments)) ) {
     mutsdf <- cbind(cassignments[ , c("chromosome", "position", "mut_type", "cluster_1")],
                     ctiming[ , c("timing", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")],
                     cccfs[ , c("major_cn", "minor_cn", "mult")])
   } else {
+    print("simulate_events_forodds: should not get here")
     mutsdf <- merge(x = cassignments[ , c("chromosome", "position", "mut_type", "cluster_1")], y = ctiming[ ,c("chromosome", "position", "timing", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")], by = c("chromosome", "position"))
     mutsdf <- merge(x = mutsdf, y = cccfs[ , c("chromosome", "position", "major_cn", "minor_cn", "mult")], by = c("chromosome", "position"))
+    mutsdf <- mutsdf[!duplicated(paste0(mutsdf$chromosome, "_", mutsdf$position, "_", mutsdf$cluster_1)),]
   }
-
+  
   csubcl <- read.delim(file = gzfile(file.path(cclustdir, paste0(sample_id, "_subclonal_structure.txt.gz"))), header = T, sep = "\t", as.is = T)
   
   # subsetting for background
@@ -84,7 +92,7 @@ simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLU
   if (length(gainidxs) == 0) gainidxs <- NA
   if (length(gainlohidxs) == 0) gainlohidxs <- NA
 
-  # If no matching variants where required for sampling (should be rare), just sample from the lot
+  # If no matching variants were required for sampling (should be rare), just sample from the lot
   # This could slightly increase bias while reducing variance
   samplesize <- sum(katcallsizes)*nreps
   if ((sum(katcallsub$nNoGain) > 0 & is.na(nogainidxs)) ||
@@ -173,8 +181,10 @@ odds_helper_internalnorm <- function(df) {
 
 ##### simulation of events ~ observations
 # debug(simulate_events_forodds)
-# SAMPLE <- "968929b0-6bfb-4a2c-bd4d-570bfcdb8a6a"
-# simlist <- mclapply(X = SAMPLE, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, mc.preschedule = T, mc.cores = 1)
+# SAMPLE <- "6cfce053-bfd6-4ca0-b74b-b2e4549e4f1f"
+# simlist <- lapply(X = SAMPLE, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS)
+# simlist <- lapply(X = samplesnhist$sample, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS)
+# simlist <- mclapply(X = samplesnhist$sample[1], FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, mc.preschedule = T, mc.cores = 1)
 simlist <- mclapply(X = samplesnhist$sample, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, mc.preschedule = F, mc.cores = 18)
 # reformat simlist from a list of samples to a list of simulations
 simlist <- lapply(X = 1:NSIMS, FUN = function(i, sims) as.data.frame(do.call(rbind, lapply(sims, '[[', i))), sims = simlist)
@@ -231,7 +241,7 @@ simodds_cvs_intnorm <- t(apply(X = simodds_cvs_intnorm, MARGIN = 2, FUN = functi
 colnames(simodds_cvs_intnorm) <- c("lower", "median", "upper")
 
 # write out + visualise
-write.table(x = simodds_cvs_intnorm, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_clonalVsubclonal_intnorm_cnstrat.txt", quote = F, sep = "\t")
+write.table(x = simodds_cvs_intnorm, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_clonalVsubclonal_intnorm_cnstrat.txt", quote = F, sep = "\t")
 p1 <- ggplot(data = as.data.frame(simodds_cvs_intnorm), mapping = aes(x = rownames(simodds_cvs_intnorm))) + geom_pointrange(mapping = aes(y = median, ymin = lower, ymax = upper)) + theme(axis.text.x = element_text(angle = 90)) + scale_y_log10(breaks = c(0.01, 0.1,1,10), labels = c(0.01,0.1,1,10))
 p1
 
@@ -258,11 +268,11 @@ simodds_evl_intnorm <- t(apply(X = simodds_evl_intnorm, MARGIN = 2, FUN = functi
 colnames(simodds_evl_intnorm) <- c("lower", "median", "upper")
 
 # write out + visualise
-write.table(x = simodds_evl_intnorm, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_earlyVlate_intnorm_cnstrat.txt", quote = F, sep = "\t")
+write.table(x = simodds_evl_intnorm, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_earlyVlate_intnorm_cnstrat.txt", quote = F, sep = "\t")
 p2 <- ggplot(data = as.data.frame(simodds_evl_intnorm), mapping = aes(x = rownames(simodds_evl_intnorm))) + geom_pointrange(mapping = aes(y = median, ymin = lower, ymax = upper)) + theme(axis.text.x = element_text(angle = 90)) + scale_y_log10(breaks = c(0.1,1,10,100), labels = c(0.1,1,10,100))
 p2
 
-save(list = c("simlist", "allpcfout_clean_inform"), file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_simlist+katcalls.RData")
+save(list = c("simlist", "allpcfout_clean_inform"), file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_simlist+katcalls.RData")
 rm(simlist)
 # load("/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_simlist+katcalls.RData")
 

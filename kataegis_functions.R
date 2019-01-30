@@ -943,15 +943,37 @@ read_all_data <- function(sample_id, pcfdir, svdir, snv_mnvdir, cnbreaksdir, rho
   ctiming <- read.delim(file = gzfile(file.path(ctimingdir, paste0(sample_id, "_prob_gained.txt"))), header = T, sep = "\t", as.is = T)
   colnames(ctiming) <- c("chromosome", "position", "mut_type", "timing", "chromosome2", "position2", "svid", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")
   
-  cmuts_all_pcf <- merge(x = muts_all_pcf[, c("chromosome", "pos", "ref", "alt", "trinuc", "foci")], #, "mut.count", "WT.count")], 
-                         y = cccfs[cccfs$type == "SNV", c("chromosome", "position", "ccf", "major_cn", "minor_cn", "mcn", "mult")],
-                         by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
-  cmuts_all_pcf <- merge(x = cmuts_all_pcf,
-                         y = cassignments[cassignments$mut_type == "SNV", c("chromosome", "position", grep(pattern = "cluster_", x = colnames(cassignments), value = T))],
-                         by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
-  cmuts_all_pcf <- merge(x = cmuts_all_pcf, 
-                         y = ctiming[ctiming$mut_type == "SNV", c("chromosome", "position", "timing", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")],
-                         by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
+  if (all(c(nrow(cassignments), nrow(cccfs), nrow(ctiming)) == nrow(cassignments)) ) {
+    mutsdf <- cbind(cassignments[ , c("chromosome", "position", "mut_type", grep(pattern = "cluster_", x = colnames(cassignments), value = T))],
+                    ctiming[ , c("timing", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")],
+                    cccfs[ , c("ccf", "major_cn", "minor_cn", "mcn", "mult")])
+    mutsdf <- mutsdf[mutsdf$mut_type == "SNV", c("chromosome", "position", "ccf", "major_cn", "minor_cn", "mcn", "mult", 
+                                                 grep(pattern = "cluster_", x = colnames(mutsdf), value = T), 
+                                                 "timing", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")]
+    # if a mut pos is duplicated, see if there's one which has a ccf
+    duppos <- mutsdf[duplicated(mutsdf$position), "position"]
+    if (length(duppos) > 0) {
+      dupmuts <- mutsdf[which(mutsdf$position %in% duppos), ]
+      dedupmuts <- do.call(rbind, by(data = dupmuts, INDICES = dupmuts$position, FUN = function(x) if (any(!is.na(x$ccf))) x[!is.na(x$ccf), ][1, ] else x[1, ]))
+      mutsdf <- rbind(mutsdf[-which(mutsdf$position %in% duppos), ], dedupmuts)
+    }
+    
+    cmuts_all_pcf <- merge(x = muts_all_pcf[, c("chromosome", "pos", "ref", "alt", "trinuc", "foci")], #, "mut.count", "WT.count")], 
+                           y = mutsdf, by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
+  } else {
+    print("read_all_data: should not be here!")
+    cmuts_all_pcf <- merge(x = muts_all_pcf[, c("chromosome", "pos", "ref", "alt", "trinuc", "foci")], #, "mut.count", "WT.count")], 
+                           y = cccfs[cccfs$type == "SNV", c("chromosome", "position", "ccf", "major_cn", "minor_cn", "mcn", "mult")],
+                           by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
+    cmuts_all_pcf <- merge(x = cmuts_all_pcf,
+                           y = cassignments[cassignments$mut_type == "SNV", c("chromosome", "position", grep(pattern = "cluster_", x = colnames(cassignments), value = T))],
+                           by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
+    cmuts_all_pcf <- merge(x = cmuts_all_pcf, 
+                           y = ctiming[ctiming$mut_type == "SNV", c("chromosome", "position", "timing", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")],
+                           by.x = c("chromosome", "pos"), by.y = c("chromosome", "position"), all.x = T)
+    cmuts_all_pcf <- cmuts_all_pcf[!duplicated(paste0(cmuts_all_pcf$chromosome, "_", cmuts_all_pcf$position, "_", cmuts_all_pcf$ref, "/", cmuts_all_pcf$alt)),]
+  }
+  
   # colnames(cmuts_all_pcf)[grep(colnames(cmuts_all_pcf), pattern = "cluster_1")] <- "p_clonal"
 
   csubcl <- read.delim(file = gzfile(file.path(cclustdir, paste0(sample_id, "_subclonal_structure.txt.gz"))), header = T, sep = "\t", as.is = T)
