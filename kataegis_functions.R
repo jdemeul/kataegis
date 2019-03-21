@@ -1009,10 +1009,15 @@ read_all_data <- function(sample_id, pcfdir, svdir, snv_mnvdir, cnbreaksdir, rho
 
 
 # read and fix combined histology file
-read_histology <- function(histologyfile) {
+read_histology <- function(histologyfile, melafile = "/srv/shared/vanloo/ICGC_annotations/icgc_melanoma_new_label.txt") {
   histology_all <- read.delim(file = histologyfile, as.is = T)
+  melaannots <- read.delim(file = melafile, as.is = T)
+  melaannots[melaannots$subtype == "Cutaneous", "subtype"] <- "Cut"
   histology_all$histology_abbreviation <- ifelse(histology_all$histology_abbreviation == "Kidney-RCC",
                                                     ifelse(grepl("papillary", histology_all$histology_tier4), "Kidney-RCC-Pap","Kidney-RCC-Clear"), histology_all$histology_abbreviation)
+  histology_all <- merge(x = histology_all, y = melaannots[, c("icgc_aliquot", "subtype")], by.x = "samplename", by.y = "icgc_aliquot", all.x = T)
+  histology_all$histology_abbreviation <- ifelse(is.na(histology_all$subtype), histology_all$histology_abbreviation, paste0(histology_all$histology_abbreviation, "-", histology_all$subtype))
+  histology_all <- histology_all[, !colnames(histology_all) %in% "subtype"]
   return(histology_all)
 }
 

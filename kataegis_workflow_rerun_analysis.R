@@ -17,6 +17,7 @@ all_sigs <- c(load_signatures(SIGFILE, mergesigs = c(7,10,17)), load_signatures(
 ### checking cosine simil sigs
 pcffiles <- list.files(path = RESULTSBASE, pattern = "_kataegis_cpcf.txt", full.names = T, recursive = T)
 allpcfout <- do.call(rbind, lapply(X = pcffiles, FUN = read.delim, header = T, sep = "\t", as.is = T))
+allpcfout$histology <- histology_all[match(x = allpcfout$sample, table = histology_all$samplename), "histology_abbreviation"]
 allpcfout[, c("nrpcc", "is_preferred")] <- histology_all[match(allpcfout$sample, histology_all$samplename), c("nrpcc", "is_preferred")]
 # allpcfout$active_sig <- factor(allpcfout$active_sig, levels = names(pcawg_sigs))
 allpcfout$sig1 <- factor(allpcfout$sig1, levels = names(all_sigs), labels = names(all_sigs))
@@ -194,7 +195,7 @@ katresults$signature <- ifelse(katresults$sig1 %in% acceptsigs,
                                                            ifelse(katresults$sig3 %in% polnsigs, "POLH", "uncertain"))))))
 
 # & !katresults$histology %in% c("Lymph-BNHL", "Lymph-CLL")
-katresults$sigsum_SV <- paste0(katresults$signature, ifelse(katresults$sv_dist <= 1e4, "_SV", ""))
+katresults$sigsum_SV <- paste0(katresults$signature, ifelse(katresults$sv_dist <= 1e3, "_SV", ""))
 katresults$sigsum_SV <- factor(x = katresults$sigsum_SV, levels = c("APO_SV", "APO", "ALT_SV", "ALT", "CTT_SV", "CTT", "POLH_SV", "POLH", "uncertain_SV", "uncertain"))
 
 katresults_repsamples <- katresults[katresults$is_preferred, ]
@@ -277,6 +278,8 @@ sinaplotdf2$rnk <- unlist(by(data = sinaplotdf2, INDICES = sinaplotdf2$histology
 sinaplotdf2[is.nan(sinaplotdf2$rnk), "rnk"] <- .35
 sinaplotdf2$rnk <- sinaplotdf2$rnk + as.numeric(sinaplotdf2$histology)
 
+write.table(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_kataegis_tumortypes_intensities.txt", x = sinaplotdf2, quote = F, sep = "\t", row.names = F)
+
 meddf <- do.call(rbind, by(data = sinaplotdf2, INDICES = sinaplotdf2$histology, FUN = function(x) data.frame(xmin = min(x$rnk), xmax = max(x$rnk), y = median(x = x$no_foci))))
 meddf$histology <- rownames(meddf)
 meddf["CNS-PiloAstro", c("xmin", "xmax")] <- meddf["CNS-PiloAstro", c("xmin", "xmax")] + c(-.35,.35)
@@ -284,7 +287,7 @@ meddf["CNS-PiloAstro", c("xmin", "xmax")] <- meddf["CNS-PiloAstro", c("xmin", "x
 
 cvect <- pcawg.colour.palette(x = tolower(sub(pattern = "-", replacement = ".", x = levels(sinaplotdf2$histology))), scheme = "tumour.subtype")
 names(cvect) <- levels(sinaplotdf2$histology)
-cvect[c("Kidney-RCC-Clear", "Other", "Kidney-RCC-Pap")] <- c('#FF4500', '#DDCDCD', '#FF4500')
+cvect[c("Skin-Melanoma-Acral", "Skin-Melanoma-Cut", "Kidney-RCC-Clear", "Other", "Kidney-RCC-Pap")] <- c("#000000", "#000000", '#FF4500', '#DDCDCD', '#FF4500')
 
 psum4 <- ggplot(data = sinaplotdf2, mapping = aes(x = rnk, y = no_foci)) + geom_point(mapping = aes(fill = histology), stroke = .25, shape = 21, colour = "black", alpha = .75, size = .75) + scale_y_log10()
 # psum4 <- ggplot(data = sinaplotdf2, mapping = aes(x = rnk, y = no_foci)) + geom_point(colour = "black", alpha = .75, size = .25) + scale_y_log10()
@@ -304,11 +307,15 @@ ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegi
 #### writing final output for jamboree
 katresults_jamboree <- merge(x = allpcfout, y = katresults, all = T)
 katresults_jamboree$is_punctuated <- !is.na(katresults_jamboree$sigsum_SV)
-katresults_jamboree$sv_assoc <- katresults_jamboree$sv_dist <= 1e4
+katresults_jamboree$sv_assoc <- F
+katresults_jamboree[which(katresults_jamboree$sv_dist <= 1e3), "sv_assoc"] <- T
 # katresults_jamboree$has_AID_sig <- "p_aid_adj"
 
 write.table(x = katresults_jamboree[, c("sample", "histology", "is_preferred", "chr", "start", "end", "total", "p_clonal", "p_subclonal", "p_early", "p_late", "p_na", "p_streak_adj", "no_phased_muts", "no_subclonal_muts", "no_antiphased_muts", "p_aid_adj", "sv_assoc", "signature")],
             file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_Kataegis_calls_JD.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+
+write.table(x = katresults_jamboree, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_Kataegis_calls_JD_allcolumns.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+
 
 ### merging annotated mutation calls for jamboree
 allmutannotfiles <- list.files(path = RESULTSBASE, pattern = "_all_muts_annot.txt", full.names = T, recursive = T)
@@ -320,6 +327,8 @@ write.table(x = allmutannot[, c("chr", "pos", "ref", "alt", "trinuc", "sample", 
 
 
 #### intersecting with driver calls
+katresults_jamboree <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_Kataegis_calls_JD_allcolumns.txt", as.is = T)
+
 allmutsfiles <- list.files(path = RESULTSBASE, pattern = "_all_muts.txt", full.names = T, recursive = T)
 allmutsout <- lapply(X = allmutsfiles, FUN = read.delim, header = T, sep = "\t", as.is = T)
 allmutsout <- data.frame(sample = rep(x = sub(pattern = "_all_muts.txt", replacement = "", x = basename(allmutsfiles)), times = sapply(X = allmutsout, FUN = nrow)), 
@@ -342,7 +351,10 @@ kataegis_drivers <- do.call(rbind, lapply(split(x = hypermut_drivers, f = 1:nrow
 
 write.table(x = kataegis_drivers, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_drivers_and_recurrence_kataegis_drivers.txt", quote = F, sep = "\t", col.names = T, row.names = F)
 
-
+kataegis_drivers_out <- kataegis_drivers[, c("sample", "histology", "gene", "p_aid_adj", "signature", "is_punctuated", "sv_assoc")]
+kataegis_drivers_out_collapse <- do.call(rbind, by(data = kataegis_drivers_out, INDICES = paste0(kataegis_drivers_out$sample, "_", kataegis_drivers_out$gene), 
+                           FUN = function(x) {y <- x[1, , drop = F]; y$p_aid_adj <- any(x$p_aid_adj <= .1); y$is_punctuated <- names(sort(table(x$signature), decreasing = T))[1]; y$is_punctuated <- all(x$is_punctuated); y$sv_assoc <- any(x$sv_assoc); return(y) }))
+write.table(x = kataegis_drivers_out_collapse, file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_drivers_and_recurrence_kataegis_drivers_collapsed.txt", quote = F, sep = "\t", col.names = T, row.names = F)
 
 # ####
 # 

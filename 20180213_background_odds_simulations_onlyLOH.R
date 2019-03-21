@@ -4,11 +4,12 @@
 library(readr)
 library(ggplot2)
 PCFDIR <- "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20180309_pcf_rerun/"
-CCLUSTDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.1_20181121/"
-CTIMINGDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.1_20181121_probgain/"
-CCCFDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.1_20181121_mutccf/"
+CCLUSTDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.3_20190221/"
+CTIMINGDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.3_20190221_probgain/"
+CCCFDIR <- "/srv/shared/vanloo/ICGC-consensus-clustering/consensus_subclonal_reconstruction_v1.3_20190221_mutccf/"
 KATRESULTSFILE <- "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_Kataegis_Results_all.txt"
-NSIMS <- 100
+SIMDIR <- "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/simulations/"
+NSIMS <- 10000
 
 source(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/code_kataegis/kataegis_functions.R", local = T)
 
@@ -23,7 +24,7 @@ samplesnhist <- allpcfout_clean_inform[!duplicated(allpcfout_clean_inform$sample
 
 ### start function defs
 # for every sample, do
-simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLUSTDIR, cccfdir = CCCFDIR, ctimingdir = CTIMINGDIR, katcalls, nreps = 10) {
+simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLUSTDIR, cccfdir = CCCFDIR, ctimingdir = CTIMINGDIR, katcalls, nreps = 10, simdir = SIMDIR) {
   print(sample_id)
   # katcalls in sample
   # must have made sure that no samples without any informative foci are excluded from input samplelist
@@ -46,7 +47,7 @@ simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLU
   # clustering consensus data
   cassignments <- read.delim(file = gzfile(file.path(cclustdir, paste0(sample_id, "_cluster_assignments.txt.gz"))), header = T, sep = "\t", as.is = T)
   cccfs <- read.delim(file = gzfile(file.path(cccfdir, paste0(sample_id, "_mutation_ccf.txt.gz"))), header = T, sep = "\t", as.is = T)
-  ctiming <- read.delim(file = gzfile(file.path(ctimingdir, paste0(sample_id, "_prob_gained.txt"))), header = T, sep = "\t", as.is = T)
+  ctiming <- read.delim(file = gzfile(file.path(ctimingdir, paste0(sample_id, "_prob_gained.txt.gz"))), header = T, sep = "\t", as.is = T)
   colnames(ctiming) <- c("chromosome", "position", "mut_type", "timing", "chromosome2", "position2", "svid", "prob_clonal_early", "prob_clonal_late", "prob_subclonal")
   
   if (all(c(nrow(cassignments), nrow(cccfs), nrow(ctiming)) == nrow(cassignments)) ) {
@@ -92,7 +93,7 @@ simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLU
   if (length(gainidxs) == 0) gainidxs <- NA
   if (length(gainlohidxs) == 0) gainlohidxs <- NA
 
-  # If no matching variants were required for sampling (should be rare), just sample from the lot
+  # If no matching variants where required for sampling (should be rare), just sample from the lot
   # This could slightly increase bias while reducing variance
   samplesize <- sum(katcallsizes)*nreps
   if ((sum(katcallsub$nNoGain) > 0 & is.na(nogainidxs)) ||
@@ -115,7 +116,10 @@ simulate_events_forodds <- function(sample_id, pcfdir = PCFDIR, cclustdir = CCLU
   sampledevents <- by(data = sampledmuts, INDICES = rep(1:(length(katcallsizes)*nreps), rep(x = katcallsizes, times = nreps)), FUN = get_odds_input_sims)
   # turn in to nreps x dataframes
   sampleddfs <- lapply(X = 1:nreps, FUN = function(i, n, evlist) do.call(rbind, evlist[((i-1)*n+1):(i*n)]), n = length(katcallsizes), evlist = sampledevents)
-  return(sampleddfs)
+  
+  saveRDS(object = sampleddfs, file = file.path(simdir, paste0(sample_id, "_oddssim.rds")))
+  return(NULL)
+  # return(sampleddfs)
 }
 
 
@@ -185,46 +189,13 @@ odds_helper_internalnorm <- function(df) {
 # simlist <- lapply(X = SAMPLE, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS)
 # simlist <- lapply(X = samplesnhist$sample, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS)
 # simlist <- mclapply(X = samplesnhist$sample[1], FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, mc.preschedule = T, mc.cores = 1)
-simlist <- mclapply(X = samplesnhist$sample, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, mc.preschedule = F, mc.cores = 18)
+mclapply(X = samplesnhist$sample, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, simdir = SIMDIR, mc.preschedule = F, mc.cores = 18)
+
+# simlist <- mclapply(X = samplesnhist$sample, FUN = simulate_events_forodds, katcalls = allpcfout_clean_inform, nreps = NSIMS, mc.preschedule = F, mc.cores = 16)
+simlist <- lapply(X = samplesnhist$sample, FUN = function(sampleid, simdir) readRDS(file = file.path(simdir, paste0(sampleid, "_oddssim.rds"))), simdir = SIMDIR)
 # reformat simlist from a list of samples to a list of simulations
 simlist <- lapply(X = 1:NSIMS, FUN = function(i, sims) as.data.frame(do.call(rbind, lapply(sims, '[[', i))), sims = simlist)
 
-# 
-# 
-# ##### computation of "background" odds using simulated events ~ observed -- CLONAL v SUBCLONAL
-# # get required info from original dataframe of results
-# is_powered <- allpcfout_clean_inform$nrpcc >= 10
-# eventweights <- c((table(allpcfout_clean_inform[is_powered, "sample"])^-1)[allpcfout_clean_inform[is_powered, "sample"]])
-# histofactor <- allpcfout_clean_inform[is_powered, "histology"]
-# 
-# # compute the odds
-# simodds_cvs <- do.call(rbind, lapply(X = simlist, FUN = function(x) get_sim_odds(numer = x$p_clonal, denom = x$p_subclonal, is_powered = is_powered, histofactor = histofactor, weights = eventweights)))
-# simodds_cvs <- t(apply(X = simodds_cvs, MARGIN = 2, FUN = function(x) quantile(x = x, probs = c(.025, .5, .975))))
-# colnames(simodds_cvs) <- c("lower", "median", "upper")
-# 
-# # write out + visualise
-# write.table(x = log10(simodds_cvs), file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_clonalVsubclonal_cnstrat.txt", quote = F, sep = "\t")
-# p1 <- ggplot(data = as.data.frame(simodds_cvs), mapping = aes(x = rownames(simodds_cvs))) + geom_pointrange(mapping = aes(y = mean, ymin = lower, ymax = upper)) + theme(axis.text.x = element_text(angle = 90)) + scale_y_log10() #+ scale_y_log10(breaks = c(0.1,1,10), labels = c(0.1,1,10), limits = c(0.1,10))
-# p1
-# 
-# 
-# ##### CLONAL EARLY v CLONAL LATE
-# # get required info from original dataframe of results
-# eventweights <- c((table(allpcfout_clean_inform$sample)^-1)[allpcfout_clean_inform$sample])
-# histofactor <- allpcfout_clean_inform$histology
-# 
-# # compute the odds
-# # simodds_evl <- do.call(rbind, lapply(X = simlist, FUN = function(x) get_sim_odds(numer = x$w_clonal_early*x$p_clonal, denom = x$w_clonal_late*x$p_clonal, is_powered = T, histofactor = histofactor, weights = eventweights)))
-# simodds_evl <- do.call(rbind, lapply(X = simlist, FUN = function(x) get_sim_odds(numer = x$p_early, denom = x$p_late, is_powered = T, histofactor = histofactor, weights = eventweights)))
-# simodds_evl <- t(apply(X = simodds_evl, MARGIN = 2, FUN = function(x) quantile(x = x, probs = c(.025, .5, .975))))
-# colnames(simodds_evl) <- c("lower", "median", "upper")
-# 
-# # write out + visualise
-# write.table(x = log10(simodds_evl), file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_earlyVlate_cnstrat.txt", quote = F, sep = "\t")
-# p2 <- ggplot(data = as.data.frame(simodds_evl), mapping = aes(x = rownames(simodds_evl))) + geom_pointrange(mapping = aes(y = mean, ymin = lower, ymax = upper)) + theme(axis.text.x = element_text(angle = 90)) + scale_y_log10(breaks = c(0.1,1,10,100), labels = c(0.1,1,10,100))
-# p2
-# 
-# 
 
 
 ###### Try internal normalisation of the odds ratio using the matched simulated events
@@ -272,23 +243,24 @@ write.table(x = simodds_evl_intnorm, file = "/srv/shared/vanloo/home/jdemeul/pro
 p2 <- ggplot(data = as.data.frame(simodds_evl_intnorm), mapping = aes(x = rownames(simodds_evl_intnorm))) + geom_pointrange(mapping = aes(y = median, ymin = lower, ymax = upper)) + theme(axis.text.x = element_text(angle = 90)) + scale_y_log10(breaks = c(0.1,1,10,100), labels = c(0.1,1,10,100))
 p2
 
-save(list = c("simlist", "allpcfout_clean_inform"), file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_simlist+katcalls.RData")
-rm(simlist)
-# load("/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_simlist+katcalls.RData")
+# save(list = c("simlist", "allpcfout_clean_inform"), file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_simlist+katcalls.RData")
+# rm(simlist)
+load("/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_simlist+katcalls.RData")
 
-# 
-# 
+
+
+
 # ##### temp visualisation stuff
 # cvs <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_clonalVsubclonal.txt", as.is = T)
 # cvs_loh <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_clonalVsubclonal_LOHonly.txt", as.is = T)
 # cvs_intnorm <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_clonalVsubclonal_intnorm.txt", as.is = T)
 # cvs_intnorm_loh <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_clonalVsubclonal_intnorm_LOHonly.txt", as.is = T)
-# 
+#
 # evl <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_earlyVlate.txt", as.is = T)
 # evl_loh <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_earlyVlate_LOHonly.txt", as.is = T)
 # evl_intnorm <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_earlyVlate_intnorm.txt", as.is = T)
 # evl_intnorm_loh <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180303_background_timing_odds_earlyVlate_intnorm_LOHonly.txt", as.is = T)
-# 
+#
 # timres <- list(cvs, cvs_loh, cvs_intnorm, cvs_intnorm_loh, evl, evl_loh, evl_intnorm, evl_intnorm_loh)
 # timres <- lapply(timres, function(x) {
 #   y <- cbind.data.frame(x, histology = rownames(x))
@@ -299,83 +271,189 @@ rm(simlist)
 # timresdf$intnorm <- rep(c(F, F, T, T, F, F, T, T), sapply(timres, nrow))
 # timresdf$lohonly <- rep(c(F, T, F, T, F, T, F, T), sapply(timres, nrow))
 # timresdf$grp <- interaction(timresdf$cvs, timresdf$intnorm, timresdf$lohonly)
-# 
+#
 # library(ggplot2)
 # p5 <- ggplot(data = timresdf[timresdf$cvs, ], mapping = aes(x = histology)) + geom_pointrange(mapping = aes(x = histology, y = mean, ymin = lower, ymax = upper, colour = interaction(intnorm, lohonly), alpha = .5), position = position_dodge(width = .75)) + theme(axis.text.x = element_text(angle = -90))
 # p5
 
 
 
-### Replacing the Venn diagrams
-load("/srv/shared/vanloo/home/mfittall/ICGC/Chromoplexy/Final_odds_3/compiled_odds_sample_tables_chromoplexy.RDa")
-ctcalls <- read.delim(file = "/srv/shared/vanloo/home/mtarabichi/PCAWG/chromothripsis/tableCT.step5.txt", as.is = T)
+##################### Replacing the Venn diagrams
+load("/srv/shared/vanloo/home/mfittall/ICGC/Chromoplexy/Final_2019_2_27/compiled_odds_sample_tables_chromoplexy_2019_02_27.RDa")
+ctcalls <- read.delim(file = "/srv/shared/vanloo/home/mtarabichi/PCAWG/chromothripsis/tableCT.Step6.022019.txt", as.is = T)
+katresults <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_Kataegis_calls_JD_allcolumns.txt", as.is = T)
+katresults_repsamples <- katresults[katresults$is_preferred & !is.na(katresults$signature), ]
 
-venndiagdf <- histology_all[histology_all$is_preferred, c("samplename", "histology_abbreviation")]
-venndiagdf$histology_abbreviation <- factor(x = venndiagdf$histology_abbreviation, levels = sort(unique(venndiagdf$histology_abbreviation)))
-venndiagdf$has_kat <- venndiagdf$samplename %in% katresults_repsamples$sample
-venndiagdf$has_cplexy <- venndiagdf$samplename %in% Chromo_odds$all_samples$sample
-venndiagdf$has_ct <- venndiagdf$samplename %in% ctcalls[ctcalls$FinalCalls == "Chromothripsis", "samplename"]
+source(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/code_kataegis/kataegis_functions.R", local = T)
+# source("/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/code_kataegis/pcawg.colour.palette.R")
 
-venndiagdf$inter <- interaction(venndiagdf[, c("has_kat", "has_cplexy", "has_ct")])
-venndiagdf$inter <- factor(x = venndiagdf$inter, levels = rev(c("TRUE.FALSE.FALSE", "TRUE.FALSE.TRUE", "TRUE.TRUE.TRUE", "TRUE.TRUE.FALSE", "FALSE.TRUE.FALSE", "FALSE.TRUE.TRUE", "FALSE.FALSE.TRUE", "FALSE.FALSE.FALSE")))
+CLEANHISTOLOGYFILE <- "/srv/shared/vanloo/ICGC_annotations/summary_table_combined_annotations_v2.txt"
 
-samplecountsdf <- do.call(rbind, by(data = venndiagdf, INDICES = venndiagdf$histology_abbreviation, FUN = function(x) data.frame(npunct = sum(x$inter != "FALSE.FALSE.FALSE"), ntot = nrow(x))))
-samplecountsdf$histology_abbreviation <- rownames(samplecountsdf)
+histology_all <- read_histology(histologyfile = CLEANHISTOLOGYFILE)
+# 
+# venndiagdf <- histology_all[histology_all$is_preferred, c("samplename", "histology_abbreviation")]
+# venndiagdf$histology_abbreviation <- factor(x = venndiagdf$histology_abbreviation, levels = sort(unique(venndiagdf$histology_abbreviation)))
+# venndiagdf$has_kat <- venndiagdf$samplename %in% katresults_repsamples$sample
+# venndiagdf$has_cplexy <- venndiagdf$samplename %in% Chromo_odds$all_samples$sample
+# venndiagdf$has_ct <- venndiagdf$samplename %in% ctcalls[ctcalls$FinalCalls == "Chromothripsis", "samplename"]
+# 
+# venndiagdf$inter <- interaction(venndiagdf[, c("has_kat", "has_cplexy", "has_ct")])
+# venndiagdf$inter <- factor(x = venndiagdf$inter, levels = rev(c("TRUE.FALSE.FALSE", "TRUE.FALSE.TRUE", "TRUE.TRUE.TRUE", "TRUE.TRUE.FALSE", "FALSE.TRUE.FALSE", "FALSE.TRUE.TRUE", "FALSE.FALSE.TRUE", "FALSE.FALSE.FALSE")))
+# 
+# samplecountsdf <- do.call(rbind, by(data = venndiagdf, INDICES = venndiagdf$histology_abbreviation, FUN = function(x) data.frame(npunct = sum(x$inter != "FALSE.FALSE.FALSE"), ntot = nrow(x))))
+# samplecountsdf$histology_abbreviation <- rownames(samplecountsdf)
 
 
 library(ggplot2)
+# 
+# p1 <- ggplot(data = venndiagdf) + geom_bar(mapping = aes(x = histology_abbreviation, fill = inter), position = position_fill())
+# p1 <- p1 + scale_fill_manual(values = c("TRUE.FALSE.FALSE" = rgb(0.8941176, 0.1019608, 0.1098039),
+#                                         "TRUE.FALSE.TRUE" = rgb(0.5549020,0.2980392,0.4156863),
+#                                         "TRUE.TRUE.TRUE" = rgb(0.4705882,0.4274510,0.3738562),
+#                                         "TRUE.TRUE.FALSE" = rgb(0.5980392,0.3941176,0.2000000),
+#                                         "FALSE.TRUE.FALSE" = rgb(0.3019608,0.6862745,0.2901961),
+#                                         "FALSE.TRUE.TRUE" = rgb(0.2588235,0.5901961,0.5058824),
+#                                         "FALSE.FALSE.TRUE" = rgb(0.2156863,0.4941176,0.7215686),
+#                                         "FALSE.FALSE.FALSE" = rgb(1,1,1,0)), guide = F)
+# p1 <- p1 + theme_minimal() + theme(axis.text = element_blank(), panel.grid = element_blank(), axis.title = element_blank())
+# p1 <- p1 + ylim(y = c(0, 1.8))
+# p1 <- p1 + geom_segment(data = data.frame(xstart = 1:length(levels(venndiagdf$histology_abbreviation)) - .3, xend = .3 + 1:length(levels(venndiagdf$histology_abbreviation))), mapping = aes(x = xstart, xend = xend, y = 1.45, yend = 1.45))
+# p1 <- p1 + geom_text(data = samplecountsdf, mapping = aes(x = histology_abbreviation, y = 1.65, label = npunct))
+# p1 <- p1 + geom_text(data = samplecountsdf, mapping = aes(x = histology_abbreviation, y = 1.25, label = ntot))
+# p1
+# ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190218_timing_results_samplefractions.pdf", plot = p1, width = 12, height = 1)
+# 
 
-p1 <- ggplot(data = venndiagdf) + geom_bar(mapping = aes(x = histology_abbreviation, fill = inter), position = position_fill())
-p1 <- p1 + scale_fill_manual(values = c("TRUE.FALSE.FALSE" = rgb(0.8941176, 0.1019608, 0.1098039),
-                                        "TRUE.FALSE.TRUE" = rgb(0.5549020,0.2980392,0.4156863),
-                                        "TRUE.TRUE.TRUE" = rgb(0.4705882,0.4274510,0.3738562),
-                                        "TRUE.TRUE.FALSE" = rgb(0.5980392,0.3941176,0.2000000),
-                                        "FALSE.TRUE.FALSE" = rgb(0.3019608,0.6862745,0.2901961),
-                                        "FALSE.TRUE.TRUE" = rgb(0.2588235,0.5901961,0.5058824),
-                                        "FALSE.FALSE.TRUE" = rgb(0.2156863,0.4941176,0.7215686),
-                                        "FALSE.FALSE.FALSE" = rgb(1,1,1,0)), guide = F)
-p1 <- p1 + theme_minimal() + theme(axis.text = element_blank(), panel.grid = element_blank(), axis.title = element_blank())
-p1 <- p1 + ylim(y = c(0, 1.8))
-p1 <- p1 + geom_segment(data = data.frame(xstart = 1:length(levels(venndiagdf$histology_abbreviation)) - .3, xend = .3 + 1:length(levels(venndiagdf$histology_abbreviation))), mapping = aes(x = xstart, xend = xend, y = 1.45, yend = 1.45))
-p1 <- p1 + geom_text(data = samplecountsdf, mapping = aes(x = histology_abbreviation, y = 1.65, label = npunct))
-p1 <- p1 + geom_text(data = samplecountsdf, mapping = aes(x = histology_abbreviation, y = 1.25, label = ntot))
+
+#### new plot to top odds
+
+stackbardf <- histology_all[histology_all$is_preferred, c("samplename", "histology_abbreviation")]
+stackbardf$histology_abbreviation <- factor(x = stackbardf$histology_abbreviation, levels = sort(unique(stackbardf$histology_abbreviation)))
+stackbardf$has_kat <- stackbardf$samplename %in% katresults_repsamples$sample
+stackbardf$has_cplexy <- stackbardf$samplename %in% Chromo_odds$all_samples$sample
+stackbardf$has_ct <- stackbardf$samplename %in% ctcalls[ctcalls$FinalCalls == "Chromothripsis", "samplename"]
+
+
+# fion here
+create_plotdf <- function(singlettdf) {
+
+row1 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "kataegis",
+                   xmin = 0, xmax = 0,
+                   ymin = 0, ymax = sum(singlettdf$has_kat)/nrow(singlettdf))
+
+row2 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "chromoplexy",
+                   xmin = 0, xmax = 0,
+                   ymin = 0, ymax = sum(singlettdf$has_kat & singlettdf$has_cplexy)/nrow(singlettdf))
+row3 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "chromoplexy",
+                   xmin = 0, xmax = 0,
+                   ymin = row1$ymax, ymax = row1$ymax + sum(!singlettdf$has_kat & singlettdf$has_cplexy)/nrow(singlettdf))
+
+row4 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "chromothripsis",
+                   xmin = 0, xmax = 0,
+                   ymin = 0, ymax = sum(singlettdf$has_kat & singlettdf$has_cplexy & singlettdf$has_ct)/nrow(singlettdf))
+row5 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "chromothripsis",
+                   xmin = 0, xmax = 0,
+                   ymin = row2$ymax, ymax = row2$ymax + sum(singlettdf$has_kat & !singlettdf$has_cplexy & singlettdf$has_ct)/nrow(singlettdf))
+row6 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "chromothripsis",
+                   xmin = 0, xmax = 0,
+                   ymin = row1$ymax, ymax = row1$ymax + sum(!singlettdf$has_kat & singlettdf$has_cplexy & singlettdf$has_ct)/nrow(singlettdf))
+row7 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+                   event = "chromothripsis",
+                   xmin = 0, xmax = 0,
+                   ymin = row3$ymax, ymax = row3$ymax + sum(!singlettdf$has_kat & !singlettdf$has_cplexy & singlettdf$has_ct)/nrow(singlettdf))
+
+# row2 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+#                    event = "chromothripsis",
+#                    xmin = 0, xmax = 0,
+#                    ymin = 0, ymax = sum(singlettdf$has_kat & singlettdf$has_ct)/nrow(singlettdf))
+# row3 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+#                    event = "chromothripsis",
+#                    xmin = 0, xmax = 0,
+#                    ymin = row1$ymax, ymax = row1$ymax + sum(!singlettdf$has_kat & singlettdf$has_ct)/nrow(singlettdf))
+# 
+# row4 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+#                    event = "chromoplexy",
+#                    xmin = 0, xmax = 0,
+#                    ymin = 0, ymax = sum(singlettdf$has_kat & singlettdf$has_ct & singlettdf$has_cplexy)/nrow(singlettdf))
+# row5 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+#                    event = "chromoplexy",
+#                    xmin = 0, xmax = 0,
+#                    ymin = row2$ymax, ymax = row2$ymax + sum(singlettdf$has_kat & !singlettdf$has_ct & singlettdf$has_cplexy)/nrow(singlettdf))
+# row6 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+#                    event = "chromoplexy",
+#                    xmin = 0, xmax = 0,
+#                    ymin = row1$ymax, ymax = row1$ymax + sum(!singlettdf$has_kat & singlettdf$has_ct & singlettdf$has_cplexy)/nrow(singlettdf))
+# row7 <- data.frame(histology_abbreviation = singlettdf$histology_abbreviation[1],
+#                    event = "chromoplexy",
+#                    xmin = 0, xmax = 0,
+#                    ymin = row3$ymax, ymax = row3$ymax + sum(!singlettdf$has_kat & !singlettdf$has_ct & singlettdf$has_cplexy)/nrow(singlettdf))
+outdf <- rbind(row1, row2, row3, row4, row5, row6, row7)
+return(outdf)
+}
+
+plotdf <- do.call(rbind, lapply(X = split(x = stackbardf, f = stackbardf$histology_abbreviation), FUN = create_plotdf))
+plotdf$histology_abbreviation <- factor(x = plotdf$histology_abbreviation)
+plotdf$event <- factor(x = plotdf$event, levels = c("kataegis", "chromoplexy", "chromothripsis"))
+plotdf$xmin <- as.numeric(x = plotdf$histology_abbreviation) + as.numeric(x = plotdf$event)/4 -.125
+plotdf$xmax <- as.numeric(x = plotdf$histology_abbreviation) + as.numeric(x = plotdf$event)/4 +.125
+
+plotdf2 <- do.call(rbind, by(data = plotdf, plotdf$histology_abbreviation, FUN = function(x) data.frame(histology_abbreviation = x$histology_abbreviation[1],
+                                                                                         xmin = min(x$xmin), xmax = max(x$xmax), ymin = 0, ymax = 1)))
+plotdf <- plotdf[plotdf$ymax > plotdf$ymin, ]
+
+samplecountsdf <- do.call(rbind, by(data = stackbardf, INDICES = stackbardf$histology_abbreviation, FUN = function(x) data.frame(npunct = sum(x$has_kat | x$has_ct | x$has_cplexy), ntot = nrow(x))))
+samplecountsdf$xpos <- as.numeric(factor(x = rownames(samplecountsdf)))
+
+p1 <- ggplot(data = plotdf) + geom_rect(data = plotdf2, mapping = aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), fill = "grey90")
+p1 <- p1 + geom_rect(mapping = aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = event), show.legend = F) + theme_minimal()
+# p1 <- p1 + geom_segment(data = plotdf2, mapping = aes(x = xmin + .125, xend = xmax - .125 , y = 1.45, yend = 1.45))
+# p1 <- p1 + geom_text(data = samplecountsdf, mapping = aes(x = xpos+.5, y = 1.65, label = npunct))
+p1 <- p1 + geom_text(data = samplecountsdf, mapping = aes(x = xpos+.5, y = 1.15, label = ntot))
+p1 <- p1 + theme(panel.grid = element_blank(), axis.text = element_blank(), axis.title = element_blank()) + 
+  scale_fill_manual(values = c(kataegis = '#e41a1c', chromothripsis = '#377eb8', chromoplexy = '#4daf4a')) + ylim(c(0,1.2))
 p1
-ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180625_timing_results_samplefractions.pdf", plot = p1, width = 12, height = 1)
 
+ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190218_timing_results_samplefractions_NEW.pdf", plot = p1, width = 12, height = 1)
 
 
 
 ### plotting final odds ratios CT, CP, KAT
-katodds_cvs <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_clonalVsubclonal_intnorm_cnstrat.txt", as.is = T)
+katodds_cvs <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_clonalVsubclonal_intnorm_cnstrat.txt", as.is = T)
 katodds_cvs$histology <- rownames(katodds_cvs)
 katodds_cvs$type <- "kataegis"
 katodds_cvs$comp <- "clonal/subclonal"
 
-katodds_evl <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180319_background_timing_odds_earlyVlate_intnorm_cnstrat.txt", as.is = T)
+katodds_evl <- read.delim(file = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_background_timing_odds_earlyVlate_intnorm_cnstrat.txt", as.is = T)
 katodds_evl$histology <- rownames(katodds_evl)
 katodds_evl$type <- "kataegis"
 katodds_evl$comp <- "early/late"
 
-load("/srv/shared/vanloo/home/mfittall/ICGC/Chromoplexy/Final_odds_3/compiled_odds_sample_tables_chromoplexy.RDa")
+load("/srv/shared/vanloo/home/mfittall/ICGC/Chromoplexy/Final_2019_2_27/compiled_odds_sample_tables_chromoplexy_2019_02_19.RDa")
 cpodds_cvs <- as.data.frame(Chromo_odds$Clonal_subclonal_odds)
 cpodds_cvs$histology <- rownames(cpodds_cvs)
-colnames(cpodds_cvs) <- c("lower", "median", "upper", "histology")
+colnames(cpodds_cvs) <- c("median", "lower", "upper", "histology")
 cpodds_cvs$type <- "chromoplexy"
 cpodds_cvs$comp <- "clonal/subclonal"
 
 cpodds_evl <- as.data.frame(Chromo_odds$EvL_odds)
 cpodds_evl$histology <- rownames(cpodds_evl)
-colnames(cpodds_evl) <- c("lower", "median", "upper", "histology")
+colnames(cpodds_evl) <- c("median", "lower", "upper", "histology")
 cpodds_evl$type <- "chromoplexy"
 cpodds_evl$comp <- "early/late"
 
-load(file = "/srv/shared/vanloo/home/mtarabichi/PCAWG/chromothripsis/output/oddsCS.nonas.Rda")
+load(file = "/srv/shared/vanloo/home/mtarabichi/PCAWG/chromothripsis/oddsCS.nonas.22022019.alloldremoved.Rda")
 ctodds_cvs <- cbind(as.data.frame(do.call(rbind, oddsCS)), names(oddsCS), stringsAsFactors = F)
 colnames(ctodds_cvs) <- c("lower", "median", "upper", "histology")
 ctodds_cvs$type <- "chromothripsis"
 ctodds_cvs$comp <- "clonal/subclonal"
 
-load(file = "/srv/shared/vanloo/home/mtarabichi/PCAWG/chromothripsis/output/oddsEL.nonas.Rda")
+load(file = "/srv/shared/vanloo/home/mtarabichi/PCAWG/chromothripsis/oddsEL.nonasv2.22022019.alloldremoved.Rda")
 ctodds_evl <- cbind(as.data.frame(do.call(rbind, oddsEL)), names(oddsEL), stringsAsFactors = F)
 colnames(ctodds_evl) <- c("lower", "median", "upper", "histology")
 ctodds_evl$type <- "chromothripsis"
@@ -388,7 +466,9 @@ oddsplotdf <- oddsplotdf[!is.na(oddsplotdf$median), ]
 rownames(oddsplotdf) <- NULL
 oddsplotdf[oddsplotdf$histology == "Kidney-RCC.clearcell", "histology"] <- "Kidney-RCC-Clear"
 oddsplotdf[oddsplotdf$histology == "Kidney-RCC.papillary", "histology"] <- "Kidney-RCC-Pap"
-oddsplotdf[oddsplotdf$histology == "Skin-Melanoma.met", "histology"] <- "Skin-Melanoma-Met"
+oddsplotdf[oddsplotdf$histology == "Skin-Melanoma.acral", "histology"] <- "Skin-Melanoma-Acral"
+oddsplotdf[oddsplotdf$histology == "Skin-Melanoma.cutaneous", "histology"] <- "Skin-Melanoma-Cut"
+oddsplotdf[oddsplotdf$histology == "Skin-Melanoma.mucosal", "histology"] <- "Skin-Melanoma-Mucosal"
 
 oddsplotdf$histology <- factor(x = oddsplotdf$histology, levels = sort(unique(histology_all$histology_abbreviation)))
 oddsplotdf$type <- factor(oddsplotdf$type, levels = c("kataegis", "chromoplexy", "chromothripsis"))
@@ -416,6 +496,6 @@ p1 <- p1 + theme_minimal() + theme(axis.text.x = element_text(angle = 90), panel
 p1 <- p1 + facet_wrap(~comp, nrow = 2)
 p1 <- p1 + labs(x = "", y = "relative odds ratio")
 p1
-ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/20180625_greaterthan3_timing_results.pdf", plot = p1, width = 12, height = 4.5)
+ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2016-17_ICGC/kataegis/results/20190130_greaterthan3_timing_results.pdf", plot = p1, width = 12, height = 4.5)
 
 
